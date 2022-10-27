@@ -50,8 +50,9 @@ Then switch to the root user for the Installion and install libssl1.1 and all re
 $ sudo bash
 $ wget http://ports.ubuntu.com/pool/main/o/openssl/libssl1.1_1.1.1f-1ubuntu2.16_arm64.deb      
 $ dpkg -i libssl1.1_1.1.1f-1ubuntu2.16_arm64.deb    
-$ wget -qO - https://www.mongodb.org/static/pgp/server-6.0.asc | sudo apt-key add -     
-$ apt install mongodb-org nano aptitude ufw nginx git python3 gcc nodejs build-essential checkinstall libssl-dev
+$ wget -qO - https://www.mongodb.org/static/pgp/server-6.0.asc | sudo apt-key add -
+$ apt update
+$ apt install mongodb-org nano ufw nginx git python3 gcc nodejs build-essential checkinstall libssl-dev certbot python3-certbot-nginx
 ```
 
 After that enable and start the mongodb:
@@ -120,10 +121,10 @@ Now create a startscript in the Homedirectory of the nightscout User with "nano 
 #!/bin/bash
 
 # environment variables
-export DISPLAY_UNITS="mg/dl"
-export MONGO_CONNECTION="mongodb://benutzer:passwort@localhost:27017/Nightscout"
+export DISPLAY_UNITS="mmol/l"
+export MONGO_CONNECTION="mongodb://<USERNAME>:<PASSWORT>@localhost:27017/Nightscout"
 export BASE_URL="127.0.0.1:1337"
-export API_SECRET="12-stellige-API-Secret-Code"
+export API_SECRET="<API-SECRET>"
 export PUMP_FIELDS="reservoir battery status"
 export DEVICESTATUS_ADVANCED=true
 export ENABLE="careportal loop iob cob openaps pump bwg rawbg basal cors direction timeago devicestatus ar2 profile boluscalc food sage iage cage alexa basalprofile bgi directions bage upbat googlehome errorcodes reservoir battery openapsbasal"
@@ -197,6 +198,89 @@ The last command should return something like this:
      CGroup: /system.slice/nightscout.service
              ├─9524 /bin/bash /home/nightscout/cgm-remote-monitor/start.sh
              └─9525 /home/nightscout/.nvm/versions/node/v14.18.1/bin/node server.js
- ```
- 
- Now we can start the nginx as reverse proxy:
+```
+Open Firewall for ssh and nginx and check if it running:
+```bash
+$ ufw allow 'Nginx Full'
+$ ufw allow OpenSSH
+$ ufw enable
+$ ufw status
+```
+The last command should return something like that:
+```
+Status: active
+
+To                         Action      From
+--                         ------      ----
+Nginx Full                 ALLOW       Anywhere
+OpenSSH                    ALLOW       Anywhere
+Nginx Full (v6)            ALLOW       Anywhere (v6)
+OpenSSH (v6)               ALLOW       Anywhere (v6)
+```
+
+Now we can start the nginx as reverse proxy and create a new /etc/nginx/sites-available/nightscout.conf from scratch:
+```
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+
+    root /var/www/html;
+    index index.html index.htm index.nginx-debian.html;
+
+    server_name <DOMAINNAME_OF_WEBSERVER>;
+    location / {
+            try_files $uri $uri/ =404;
+    }
+}
+```
+
+```bash
+$ sudo unlink /etc/nginx/sites-enabled/default
+$ sudo ln -s /etc/nginx/sites-available/nightscout.conf /etc/nginx/sites-enabled/
+$ sudo service nginx restart
+```
+
+Get a TLS Cert from the Certbot:
+```bash
+$ sudo certbot --nginx -d domain.de -d <DOMAINNAME_OF_WEBSERVER>
+```
+Enter your E-Mailadress, Accept the Conditions and redirect always to https (Option 2), after that the nginx should be listing on 443 and the /etc/init.d/sites-available/nightscout.conf should look like this:
+```
+server {
+    listen [::]:443 ssl ipv6only=on; # managed by Certbot
+    listen 443 ssl; # managed by Certbot
+    ssl_certificate /etc/letsencrypt/live/<DOMAINNAME_OF_WEBSERVER>/fullchain.pem; # managed by Certbot
+    ssl_certificate_key /etc/letsencrypt/live/<DOMAINNAME_OF_WEBSERVER>t/privkey.pem; # managed by Certbot
+    include /etc/letsencrypt/options-ssl-nginx.conf; # managed by Certbot
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem; # managed by Certbot
+
+        ssl_stapling on;
+        ssl_stapling_verify on;
+        add_header Strict-Transport-Security max-age=15768000;
+        location ~ /.well-known {
+                allow all;
+        }
+        location / {
+                proxy_pass http://localhost:1337/;
+                proxy_set_header Upgrade $http_upgrade;
+                proxy_set_header Connection 'upgrade';
+                proxy_set_header X-Forwarded-Proto "https";
+                #proxy_set_header Host $host;
+                #proxy_cache_bypass $http_upgrade;
+        }
+}
+server {
+    if ($host = <DOMAINNAME_OF_WEBSERVER>) {
+        return 301 https://$host$request_uri;
+    } # managed by Certbot
+    listen 80 ;
+    listen [::]:80 ;
+    server_name <DOMAINNAME_OF_WEBSERVER>;
+    return 404; # managed by Certbot
+}
+```
+At the end you should test if the Let's Encrypt Certs are automatically renewed:
+```bash
+$ sudo systemctl status certbot.timer
+$ sudo certbot renew --dry-run
+```
