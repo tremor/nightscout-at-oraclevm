@@ -163,7 +163,7 @@ $ chmod 775 start.sh
 $ sudo nano /etc/systemd/system/nightscout.service
 ```
 The Content sould look like this:
-
+```
 [Unit]
 Description=Nightscout Service
 After=network.target
@@ -176,3 +176,27 @@ ExecStart=/home/nightscout/start.sh
 [Install]
 WantedBy=multi-user.target
 ```
+
+Then Reload the systemctl and enable and start the Nightscout Website at Port 1337 (not public to the world and not encrypted!) 
+```bash
+$ sudo systemctl daemon-reload
+$ sudo systemctl enable nightscout.service
+$ sudo systemctl start nightscout.service
+$ sudo systemctl status nightscout.service
+```
+
+The last command should return something like this:
+```
+● nightscout.service - Nightscout Service
+     Loaded: loaded (/etc/systemd/system/nightscout.service; enabled; vendor preset: enabled)
+     Active: active (running) since Mon 2022-10-24 12:53:21 UTC; 3 days ago
+   Main PID: 9524 (start.sh)
+      Tasks: 12 (limit: 1090)
+     Memory: 81.4M
+        CPU: 4min 29.768s
+     CGroup: /system.slice/nightscout.service
+             ├─9524 /bin/bash /home/nightscout/cgm-remote-monitor/start.sh
+             └─9525 /home/nightscout/.nvm/versions/node/v14.18.1/bin/node server.js
+ ```
+ 
+ Now we can start the nginx as reverse proxy:
